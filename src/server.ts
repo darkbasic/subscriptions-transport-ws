@@ -1,3 +1,7 @@
+declare let window: any;
+const _global = typeof global !== 'undefined' ? global : (typeof window !== 'undefined' ? window : {});
+const NativeWebSocket = _global.WebSocket || _global.MozWebSocket;
+
 import * as WebSocket from 'ws';
 
 import MessageTypes from './message-types';
@@ -103,12 +107,13 @@ export class SubscriptionServer {
   private keepAlive: number;
   private closeHandler: () => void;
   private specifiedRules: Array<(context: ValidationContext) => any>;
+  private wsImpl: any;
 
-  public static create(options: ServerOptions, socketOptions: WebSocket.ServerOptions) {
-    return new SubscriptionServer(options, socketOptions);
+  public static create(options: ServerOptions, socketOptions: WebSocket.ServerOptions, webSocketImpl?: any) {
+    return new SubscriptionServer(options, socketOptions, webSocketImpl);
   }
 
-  constructor(options: ServerOptions, socketOptions: WebSocket.ServerOptions) {
+  constructor(options: ServerOptions, socketOptions: WebSocket.ServerOptions, webSocketImpl?: any) {
     const {
       onOperation, onOperationComplete, onConnect, onDisconnect, keepAlive,
     } = options;
@@ -122,8 +127,14 @@ export class SubscriptionServer {
     this.onDisconnect = onDisconnect;
     this.keepAlive = keepAlive;
 
+    this.wsImpl = webSocketImpl || NativeWebSocket;
+
+    if (!this.wsImpl) {
+        throw new Error('Unable to find native implementation, or alternative implementation for WebSocket!');
+    }
+
     // Init and connect websocket server to http
-    this.wsServer = new WebSocket.Server(socketOptions || {});
+    this.wsServer = new this.wsImpl.Server(socketOptions || {});
 
     const connectionHandler = ((socket: WebSocket, request: IncomingMessage) => {
       // Add `upgradeReq` to the socket object to support old API, without creating a memory leak
@@ -266,7 +277,7 @@ export class SubscriptionServer {
               this.sendKeepAlive(connectionContext);
               // Regular keep alive messages if keepAlive is set
               const keepAliveTimer = setInterval(() => {
-                if (connectionContext.socket.readyState === WebSocket.OPEN) {
+                if (connectionContext.socket.readyState === this.wsImpl.OPEN) {
                   this.sendKeepAlive(connectionContext);
                 } else {
                   clearInterval(keepAliveTimer);
@@ -444,7 +455,7 @@ export class SubscriptionServer {
       payload,
     });
 
-    if (parsedMessage && connectionContext.socket.readyState === WebSocket.OPEN) {
+    if (parsedMessage && connectionContext.socket.readyState === this.wsImpl.OPEN) {
       connectionContext.socket.send(JSON.stringify(parsedMessage));
     }
   }
